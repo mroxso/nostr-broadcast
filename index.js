@@ -40,6 +40,11 @@ relayFromUrls.forEach(async (relayUrl) => {
 
   const { relay: relayTo } = await connect(relayToUrl)
 
+  if((relayTo === undefined) || (relayFrom === undefined)) {
+    console.error('could not connect to one of the relays, skipping.')
+    return 0
+  }
+
   const eventsToMove = []
 
   relayFrom.on('connect', () => {
