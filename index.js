@@ -2,106 +2,94 @@ import 'websocket-polyfill'
 import pkg from 'nostr-tools'
 
 const relayInit = pkg.relayInit
-
-// let pk = 'YOUR_HEX_ENCODED_PUBLIC_KEY_HERE'
 let pk = process.env.PUBLIC_KEY
 
-// const relayFromUrls = [
-//   'wss://no.str.cr',
-//   'wss://paid.no.str.cr',
-//   'wss://nostr.fly.dev',
-//   'wss://relay.snort.social',
-//   'wss://relay.realsearch.cc',
-//   'wss://relay.nostrgraph.net',
-//   'wss://relay.minds.com/nostr/v1/ws',
-//   'wss://nos.lol',
-//   'wss://relay.current.fyi',
-//   'wss://puravida.nostr.land',
-//   'wss://nostr.milou.lol',
-//   'wss://eden.nostr.land',
-//   'wss://relay.damus.io',
-//   'wss://nostr.oxtr.dev',
-// ]
 const relayFromUrls = process.env.RELAY_FROM_URLS.split(',')
-
-// const relayToUrl = 'TO_RELAY_URL'
 const relayToUrl = process.env.RELAY_TO_URL
 
 const eventsReceived = []
 
-relayFromUrls.forEach(async (relayUrl) => {
-  // const relayFrom = relayInit(relayUrl)
-  // await relayFrom.connect()
-
-  // const relayTo = relayInit(relayToUrl)
-  // await relayTo.connect()
-
-  const { relay: relayFrom } = await connect(relayUrl)
-
-  const { relay: relayTo } = await connect(relayToUrl)
-
-  if((relayTo === undefined) || (relayFrom === undefined)) {
-    console.error('could not connect to one of the relays, skipping.')
-    return 0
-  }
-
-  const eventsToMove = []
-
-  relayFrom.on('connect', () => {
-    console.log(`connected to ${relayFrom.url}`)
-  })
-
-  relayTo.on('connect', () => {
-    console.log(`connected to ${relayTo.url}`)
-  })
-
-  const sub = relayFrom.sub([
-    {
-      authors: [pk],
+async function run() {
+  for (const relayUrl of relayFromUrls) {
+    const relayFrom = await connect(relayUrl)
+    if (!relayFrom) {
+      continue // skip this relay and move to the next one
     }
-  ])
-  sub.on('event', event => {
-    if(eventsReceived.indexOf(event.id) === -1) {
-      eventsToMove.push(event)
-      eventsReceived.push(event.id)
+    const relayTo = await connect(relayToUrl)
+    if (!relayTo) {
+      await relayFrom.close()
+      continue // skip this relay and move to the next one
     }
-  })
-  sub.on('eose', async () => {
-    sub.unsub()
 
-    console.log(`got ${eventsToMove.length} events from ${relayFrom.url}`)
+    const eventsToMove = []
 
-    eventsToMove.forEach(async (event, index) => {
-      const pub = relayTo.publish(event)
-      pub.on('ok', async () => {
-        console.log(`${relayTo.url} has accepted our event from ${relayFrom.url} on ${new Date(event.created_at * 1000).toISOString()} of kind ${event.kind} and ID ${event.id}`)
+    relayFrom.on('connect', () => {
+      console.log(`connected to ${relayFrom.url}`)
+    })
 
-        if(index == eventsToMove.length - 1) {
+    relayTo.on('connect', () => {
+      console.log(`connected to ${relayTo.url}`)
+    })
+
+    const sub = relayFrom.sub([
+      {
+        authors: [pk],
+      }
+    ])
+    sub.on('event', event => {
+      if(eventsReceived.indexOf(event.id) === -1) {
+        eventsToMove.push(event)
+        eventsReceived.push(event.id)
+      }
+    })
+    sub.on('eose', async () => {
+      sub.unsub()
+
+      console.log(`got ${eventsToMove.length} events from ${relayFrom.url}`)
+
+      for (const [index, event] of eventsToMove.entries()) {
+        try {
+          await relayTo.publish(event)
+          console.log(`${relayTo.url} has accepted our event from ${relayFrom.url} on ${new Date(event.created_at * 1000).toISOString()} of kind ${event.kind} and ID ${event.id}`)
+        } catch (error) {
+          console.error(`could not publish to: ${relayTo.url}, skipping event ${event.id}.`)
+          continue // skip this event and move to the next one
+        }
+
+        if(index === eventsToMove.length - 1) {
           console.log(`done with ${relayFrom.url}`)
           await relayFrom.close()
           await relayTo.close()
         }
-      })
+      }
     })
-  })
-})
-
-// function getHexPublicKey (publicKeyText) {
-//   if (`${publicKeyText}`.match(/[a-f0-9]{64}/)) {
-//     return publicKeyText
-//   }
-//   return nip19.decode(publicKeyText).data
-// }
+  }
+}
 
 async function connect(relayUrl) {
   const relay = relayInit(relayUrl)
 
-  try {
-    await relay.connect()
-  } catch (error) {
-    console.error(`could not connect to: ${relayUrl}, skipping.`)
-    return { relay: undefined }
-  }
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      relay.close()
+      console.error(`timed out while connecting to: ${relayUrl}, skipping.`)
+      resolve(null) // signal unsuccessful attempt
+    }, 5000) // 5 seconds timeout
 
-  return { relay }
+    relay.on('connect', () => {
+      clearTimeout(timeoutId)
+      console.log(`connected to: ${relayUrl}.`)
+      resolve(relay) // signal successful attempt
+    })
+
+    relay.on('error', (error) => {
+      clearTimeout(timeoutId)
+      console.error(`could not connect to: ${relayUrl}, skipping.`, error)
+      resolve(null) // signal unsuccessful attempt
+    })
+
+    relay.connect()
+  })
 }
+
+run()
