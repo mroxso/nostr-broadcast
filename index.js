@@ -30,11 +30,20 @@ const relayToUrl = process.env.RELAY_TO_URL
 const eventsReceived = []
 
 relayFromUrls.forEach(async (relayUrl) => {
-  const relayFrom = relayInit(relayUrl)
-  await relayFrom.connect()
+  // const relayFrom = relayInit(relayUrl)
+  // await relayFrom.connect()
 
-  const relayTo = relayInit(relayToUrl)
-  await relayTo.connect()
+  // const relayTo = relayInit(relayToUrl)
+  // await relayTo.connect()
+
+  const { relay: relayFrom } = await connect(relayUrl)
+
+  const { relay: relayTo } = await connect(relayToUrl)
+
+  if((relayTo === undefined) || (relayFrom === undefined)) {
+    console.error('could not connect to one of the relays, skipping.')
+    return 0
+  }
 
   const eventsToMove = []
 
@@ -76,3 +85,23 @@ relayFromUrls.forEach(async (relayUrl) => {
     })
   })
 })
+
+// function getHexPublicKey (publicKeyText) {
+//   if (`${publicKeyText}`.match(/[a-f0-9]{64}/)) {
+//     return publicKeyText
+//   }
+//   return nip19.decode(publicKeyText).data
+// }
+
+async function connect(relayUrl) {
+  const relay = relayInit(relayUrl)
+
+  try {
+    await relay.connect()
+  } catch (error) {
+    console.error(`could not connect to: ${relayUrl}, skipping.`)
+    return { relay: undefined }
+  }
+
+  return { relay }
+}
