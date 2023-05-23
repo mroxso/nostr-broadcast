@@ -100,6 +100,7 @@ async function connect(relayUrl) {
     await relay.connect()
   } catch (error) {
     console.error(`could not connect to: ${relayUrl}, skipping.`)
+    return { relay: undefined }
   }
 
   return { relay }
